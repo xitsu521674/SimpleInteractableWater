@@ -1,0 +1,99 @@
+#version 450
+layout(local_size_x = 1, local_size_y = 1, local_size_z = 1) in;
+layout(r32f,binding = 0) uniform image2D out_tex;
+
+uniform vec3 cameraPos;
+uniform vec3 lightPos;
+uniform samplerCube floorCube;
+uniform sampler2D heighmap;
+uniform sampler2D clickmap;
+uniform sampler2D sinwavemap;
+uniform float sinMode;
+
+uniform float amplitude;
+uniform float wavelength;
+uniform float speed;
+uniform float time;
+uniform mat4 model;
+float wave(vec2 pos,float amp,float dx,float dz,float frequency,float time){
+    return amp * sin((pos.x*cos(dx*3.14159/180)+pos.y*sin(dz*3.14159/180))*frequency+time*10);
+}
+void main() {
+    // get position to read/write data from
+    ivec2 pos = ivec2( gl_GlobalInvocationID.xy );
+    //////////////////////////////
+    vec2 fpos = vec2(pos.x/4,pos.y/4);
+    float unit = 1.0f/800.0f;
+    if(sinMode==0){
+        vec2 Coord = vec2(fpos.x/200 , fpos.y/200);
+        float heightL = texture2D(heighmap,vec2(Coord.x-unit,Coord.y)).x
+                       +texture2D(clickmap,vec2(Coord.x-unit,Coord.y)).x
+                       +texture2D(sinwavemap,vec2(Coord.x-unit,Coord.y)).x;
+        float heightR = texture2D(heighmap,vec2(Coord.x+unit,Coord.y)).x
+                       +texture2D(clickmap,vec2(Coord.x+unit,Coord.y)).x
+                       +texture2D(sinwavemap,vec2(Coord.x+unit,Coord.y)).x;
+        float heightU = texture2D(heighmap,vec2(Coord.x,Coord.y+unit)).x
+                       +texture2D(clickmap,vec2(Coord.x,Coord.y+unit)).x
+                       +texture2D(sinwavemap,vec2(Coord.x,Coord.y+unit)).x;
+        float heightD = texture2D(heighmap,vec2(Coord.x,Coord.y-unit)).x
+                       +texture2D(clickmap,vec2(Coord.x,Coord.y-unit)).x
+                       +texture2D(sinwavemap,vec2(Coord.x,Coord.y-unit)).x;
+       float dx = abs(heightL-heightR);
+       float dy = abs(heightU-heightD);
+       float signDx = 1,signDy = 1;
+       if(heightL<heightR){
+            signDx = -1;
+       }
+       if(heightU-heightD){
+            signDy = -1;
+       }
+       vec3 Normal = normalize(vec3(dx,2.0f,dy));
+       Normal.x *= signDx;
+       Normal.z *= signDy;
+
+
+
+        vec4 MapheightColor = texture2D(heighmap,Coord);
+        float MapdeltaY = MapheightColor.x/255.0;
+        vec4 ClickheightColor = texture2D(clickmap,Coord);
+            float ClickdeltaY = ClickheightColor.x/255.0;
+            vec4 SinwaveheightColor = texture2D(sinwavemap,Coord);
+            float SinwavedeltaY = SinwaveheightColor.x/255.0;
+        /////////////////////////////
+        vec3 I = normalize(vec3(-100+fpos.x,15+(MapdeltaY*10000) + (ClickdeltaY*5000) + (SinwavedeltaY*20000),-100+fpos.y) - lightPos);
+        float ratio = 1.00 / 1.33;
+        vec3 Rfr = refract(I, normalize(Normal), ratio);
+        vec3 color = vec3(texture(floorCube, Rfr).rgb);
+        highp int x = int(floor(200.0f*color.x));
+        highp int y = int(floor(200.0f*color.y));
+        ivec2 dest = ivec2(x,y);
+        float in_val = imageLoad( out_tex, dest ).r;
+
+        if(color.z==0){    
+            imageStore( out_tex, dest, vec4( in_val+1, 0.0, 0.0, 0.0 ) );
+        }
+
+    }else if(sinMode==1){
+        float heightL = wave(vec2(pos.x-0.0001,pos.y),0.25,70,70,0.5,time) + wave(vec2(pos.x-0.0001,pos.y),3.5,90,90,0.2,time) + wave(vec2(pos.x-0.0001,pos.y),5.5,-45,-45,1,time) +wave(vec2(pos.x-0.0001,pos.y),5,45,-45,0.12,time);
+        float heightR = wave(vec2(pos.x+0.0001,pos.y),0.25,70,70,0.5,time) + wave(vec2(pos.x+0.0001,pos.y),3.5,90,90,0.2,time) + wave(vec2(pos.x+0.0001,pos.y),5.5,-45,-45,1,time) +wave(vec2(pos.x+0.0001,pos.y),5,45,-45,0.12,time);
+        float heightU = wave(vec2(pos.x,pos.y-0.0001),0.25,70,70,0.5,time) + wave(vec2(pos.x,pos.y-0.0001),3.5,90,90,0.2,time) + wave(vec2(pos.x,pos.y-0.0001),5.5,-45,-45,1,time) +wave(vec2(pos.x,pos.y-0.0001),5,45,-45,0.12,time);
+        float heightD = wave(vec2(pos.x,pos.y+0.0001),0.25,70,70,0.5,time) + wave(vec2(pos.x,pos.y+0.0001),3.5,90,90,0.2,time) + wave(vec2(pos.x,pos.y+0.0001),5.5,-45,-45,1,time) +wave(vec2(pos.x,pos.y+1),5,45,-45,0.12,time);
+        float dx = heightL-heightR;
+        float dy = heightU-heightD;
+        vec3 Normal = normalize(vec3(dx,1.0f,dy));
+
+        vec3 I = normalize(vec3(-100+fpos.x,40+pos.y,-100+fpos.y) - lightPos);
+        float ratio = 1.00 / 1.33;
+        vec3 Rfr = refract(I, normalize(Normal), ratio);
+        vec3 color = vec3(texture(floorCube, Rfr).rgb);
+        highp int x = int(floor(200.0f*color.x));
+        highp int y = int(floor(200.0f*color.y));
+        ivec2 dest = ivec2(x,y);
+        float in_val = imageLoad( out_tex, dest ).r;
+        if(color.z==0){    
+            imageStore( out_tex, dest, vec4( in_val+1, 0.0, 0.0, 0.0 ) );
+        }
+    }
+    
+
+}
